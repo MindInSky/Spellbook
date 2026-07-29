@@ -15,7 +15,7 @@ Convert MOV to MP4, max 1080p, smaller file size. Audio is stripped by default.
 
 Options:
   -a, --keep-audio  Include audio (re-encoded as AAC 128k)
-  -v, --verbose     Show conversion settings and ffmpeg output
+  -v, --verbose     Show conversion settings and ffmpeg output (default: progress bar)
 
 Arguments:
   input.mov   Source video file (required)
@@ -239,8 +239,153 @@ file_size_human() {
   ls -lh "$1" | awk '{print $5}'
 }
 
+file_size_bytes() {
+  wc -c < "$1" | tr -d ' '
+}
+
+size_change_msg() {
+  local input="$1" output="$2"
+  local input_bytes output_bytes
+
+  input_bytes="$(file_size_bytes "$input")"
+  output_bytes="$(file_size_bytes "$output")"
+
+  if (( input_bytes == 0 )); then
+    return 0
+  fi
+
+  awk -v inp="$input_bytes" -v out="$output_bytes" '
+    function fmt_ratio(r,   s) {
+      if (r >= 10) {
+        s = sprintf("%.0f", r)
+      } else if (r == int(r + 0.001)) {
+        s = sprintf("%.0f", r)
+      } else {
+        s = sprintf("%.1f", r)
+      }
+      return s
+    }
+    BEGIN {
+      if (out == inp) {
+        print "same size"
+        exit
+      }
+      if (out < inp) {
+        print fmt_ratio(inp / out) " times smaller"
+      } else {
+        print fmt_ratio(out / inp) " times bigger"
+      }
+    }
+  '
+}
+
 print_file_summary() {
   printf '%s | %s\n' "$1" "$(file_size_human "$1")"
+}
+
+media_duration_ms() {
+  local duration
+
+  if ! command -v ffprobe >/dev/null 2>&1; then
+    echo 0
+    return 0
+  fi
+
+  duration="$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$1" 2>/dev/null || true)"
+  if [[ -z "$duration" ]]; then
+    echo 0
+    return 0
+  fi
+
+  awk -v d="$duration" 'BEGIN { printf "%.0f\n", d * 1000 }'
+}
+
+terminal_cols() {
+  local cols
+
+  cols="$(tput cols 2>/dev/null || echo 80)"
+  if [[ "$cols" -lt 30 ]]; then
+    cols=30
+  fi
+  printf '%s' "$cols"
+}
+
+progress_bar_string() {
+  local filled="$1" empty="$2" bar=""
+
+  if (( filled > 0 )); then
+    bar="$(printf '%*s' "$filled" '' | tr ' ' '█')"
+  fi
+  if (( empty > 0 )); then
+    bar="${bar}$(printf '%*s' "$empty" '' | tr ' ' '░')"
+  fi
+  printf '%s' "$bar"
+}
+
+render_progress_bar() {
+  local pct="$1" cols="$2" label="Converting"
+  local overhead bar_width filled empty
+
+  overhead=$((${#label} + 9))
+  bar_width=$((cols - overhead))
+  if (( bar_width < 10 )); then
+    bar_width=10
+  fi
+
+  filled=$((pct * bar_width / 100))
+  empty=$((bar_width - filled))
+
+  printf '\r%s [%s] %3d%%' "$label" "$(progress_bar_string "$filled" "$empty")" "$pct"
+}
+
+run_ffmpeg_with_progress() {
+  local verbose="$1" input="$2" duration_ms cols pct out_time_ms progress_fifo ffmpeg_pid status
+  shift 2
+  local -a ffmpeg_args=("$@")
+
+  if [[ "$verbose" == 1 ]]; then
+    ffmpeg "${ffmpeg_args[@]}"
+    return $?
+  fi
+
+  duration_ms="$(media_duration_ms "$input")"
+  cols="$(terminal_cols)"
+
+  if [[ ! -t 1 ]] || (( duration_ms <= 0 )); then
+    ffmpeg "${ffmpeg_args[@]}"
+    return $?
+  fi
+
+  progress_fifo="$(mktemp -u "${TMPDIR:-/tmp}/mov2mp4-progress.XXXXXX")"
+  mkfifo "$progress_fifo"
+
+  ffmpeg "${ffmpeg_args[@]}" -progress "$progress_fifo" &
+  ffmpeg_pid=$!
+
+  while IFS= read -r line; do
+    case "$line" in
+      out_time_ms=*)
+        out_time_ms="${line#out_time_ms=}"
+        if [[ "$out_time_ms" =~ ^[0-9]+$ ]]; then
+          pct=$((out_time_ms * 100 / duration_ms))
+          if (( pct > 100 )); then
+            pct=100
+          fi
+          render_progress_bar "$pct" "$cols"
+        fi
+        ;;
+      progress=end)
+        break
+        ;;
+    esac
+  done < "$progress_fifo"
+
+  wait "$ffmpeg_pid"
+  status=$?
+  rm -f "$progress_fifo"
+  render_progress_bar 100 "$cols"
+  printf '\n'
+  return "$status"
 }
 
 convert_mov() {
@@ -287,13 +432,21 @@ convert_mov() {
     echo
   fi
 
-  ffmpeg "${ffmpeg_log_args[@]}" -i "$input" \
+  run_ffmpeg_with_progress "$verbose" "$input" \
+    "${ffmpeg_log_args[@]}" -i "$input" \
     -vf "scale=1920:1080:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2" \
     -c:v libx264 -crf "$crf" -preset "$preset" \
     "${audio_args[@]}" -movflags +faststart \
     -y "$output"
 
-  echo "Done."
+  local size_msg
+
+  size_msg="$(size_change_msg "$input" "$output")"
+  if [[ -n "$size_msg" ]]; then
+    echo "Done. $size_msg"
+  else
+    echo "Done."
+  fi
   print_file_summary "$input"
   print_file_summary "$output"
 }
