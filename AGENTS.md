@@ -47,6 +47,7 @@ Install details:
 - Support zsh (`.zshrc`), bash (`.bashrc` or `.bash_profile`), fish (`~/.config/fish/config.fish`)
 - Skip if marker already present (idempotent)
 - Check external dependencies during `install`; attempt Homebrew install when available
+- **No copy on install** — the alias points at the script file in place. Editing or pulling updates to that file takes effect immediately; reinstall is not required unless the script was moved to a new path (then `uninstall` + `install`, or update the alias path manually)
 
 ## README conventions
 
@@ -56,7 +57,8 @@ Each script directory gets its own `README.md` covering:
 2. External requirements (e.g. ffmpeg)
 3. **Run without installing** — emphasize single-file, copy-anywhere usage
 4. **Install (optional)** — only if the script supports it
-5. Usage examples, flags, and argument defaults
+5. **Update** — if installed, note that install is an alias only; pull or edit the script in place (no reinstall). Mention reinstall only when the script directory moves
+6. Usage examples, flags, and argument defaults
 
 Keep READMEs short. Don't add per-script agent files unless a script becomes unusually complex.
 

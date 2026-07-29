@@ -13,6 +13,8 @@ Copy or download `mov2mp4.sh` and run it directly:
 ```bash
 bash mov2mp4.sh recording.mov
 bash mov2mp4.sh -a recording.mov compressed.mp4
+bash mov2mp4.sh Screen Recording.mov
+bash mov2mp4.sh "My Video.mov" "My Output.mp4"
 ```
 
 Or, if executable:
@@ -41,7 +43,17 @@ Then run from anywhere:
 mov2mp4 recording.mov
 mov2mp4 -a recording.mov compressed.mp4
 mov2mp4 recording.mov compressed.mp4 30 slow
+mov2mp4 Screen Recording.mov
+mov2mp4 "My Video.mov" "My Output.mp4"
 ```
+
+Paths with spaces work unquoted or quoted — the script joins split arguments into input/output paths.
+
+## Update
+
+Install only adds an alias pointing at `mov2mp4.sh` in this directory — nothing is copied elsewhere. To get a newer version, pull or replace the file here; the next `mov2mp4` run uses it automatically. No need to run `install` again.
+
+If you move this directory, run `uninstall` then `install` from the new location (or update the alias path in your shell rc file).
 
 | Flag | Description |
 |------|-------------|

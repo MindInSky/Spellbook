@@ -8,8 +8,8 @@ MARKER="# spellbook: mov2mp4"
 usage() {
   cat <<'EOF'
 Usage: mov2mp4.sh [options] <input.mov> [output.mp4] [crf] [preset]
-       mov2mp4.sh install
-       mov2mp4.sh uninstall
+      mov2mp4.sh install
+      mov2mp4.sh uninstall
 
 Convert MOV to MP4, max 1080p, smaller file size. Audio is stripped by default.
 
@@ -26,6 +26,8 @@ Examples:
   mov2mp4.sh recording.mov
   mov2mp4.sh -a recording.mov compressed.mp4
   mov2mp4.sh recording.mov compressed.mp4 30 slow
+  mov2mp4.sh Screen Recording.mov
+  mov2mp4.sh "Screen Recording.mov" "My Output.mp4"
 
 See README.md in this directory for installation.
 EOF
@@ -131,14 +133,118 @@ uninstall_cmd() {
   echo "Removed mov2mp4 from $rc_file"
 }
 
+X264_PRESETS=(ultrafast superfast veryfast faster fast medium slow slower veryslow placebo)
+
+is_x264_preset() {
+  local candidate="$1" preset
+  for preset in "${X264_PRESETS[@]}"; do
+    [[ "$candidate" == "$preset" ]] && return 0
+  done
+  return 1
+}
+
+is_crf_value() {
+  [[ "$1" =~ ^[0-9]+$ ]] && (( $1 >= 18 && $1 <= 32 ))
+}
+
+join_args() {
+  local joined="" part
+  for part in "$@"; do
+    if [[ -n "$joined" ]]; then
+      joined="$joined $part"
+    else
+      joined="$part"
+    fi
+  done
+  printf '%s' "$joined"
+}
+
+# Join argv fragments so paths with spaces work without quoting.
+parse_convert_args() {
+  local -a args=("$@")
+  local crf=28 preset=slow
+  local last_idx input output accum="" i j out_accum
+
+  if [[ ${#args[@]} -gt 0 ]]; then
+    last_idx=$((${#args[@]} - 1))
+    if is_x264_preset "${args[$last_idx]}"; then
+      preset="${args[$last_idx]}"
+      args=("${args[@]:0:$last_idx}")
+    fi
+  fi
+
+  if [[ ${#args[@]} -gt 0 ]]; then
+    last_idx=$((${#args[@]} - 1))
+    if is_crf_value "${args[$last_idx]}"; then
+      crf="${args[$last_idx]}"
+      args=("${args[@]:0:$last_idx}")
+    fi
+  fi
+
+  if [[ ${#args[@]} -eq 0 ]]; then
+    echo "Error: input file required" >&2
+    exit 1
+  fi
+
+  input=""
+  output=""
+
+  for (( i=0; i<${#args[@]}; i++ )); do
+    if [[ -n "$accum" ]]; then
+      accum="$accum ${args[i]}"
+    else
+      accum="${args[i]}"
+    fi
+    if [[ -f "$accum" ]]; then
+      input="$accum"
+      accum=""
+      i=$((i + 1))
+      break
+    fi
+  done
+
+  if [[ -n "$input" ]]; then
+    if [[ $i -lt ${#args[@]} ]]; then
+      output="$(join_args "${args[@]:i}")"
+    fi
+  elif [[ ${#args[@]} -eq 1 ]]; then
+    input="${args[0]}"
+  else
+    for (( j=1; j<${#args[@]}; j++ )); do
+      out_accum="$(join_args "${args[@]:j}")"
+      accum="$(join_args "${args[@]:0:j}")"
+      if [[ "$out_accum" =~ \.[mM][pP]4$ && "$accum" =~ \.(mov|MOV|mp4|MP4)$ ]]; then
+        input="$accum"
+        output="$out_accum"
+        break
+      fi
+    done
+    if [[ -z "$input" ]]; then
+      input="$(join_args "${args[@]}")"
+    fi
+  fi
+
+  if [[ -z "$output" && -n "$input" ]]; then
+    output="${input%.*}.mp4"
+  fi
+
+  PARSED_INPUT="$input"
+  PARSED_OUTPUT="$output"
+  PARSED_CRF="$crf"
+  PARSED_PRESET="$preset"
+}
+
 convert_mov() {
   local keep_audio="$1"
   shift
-  local input="$1"
-  local output="${2:-${input%.*}.mp4}"
-  local crf="${3:-28}"
-  local preset="${4:-slow}"
   local -a audio_args
+
+  parse_convert_args "$@"
+
+  local input="$PARSED_INPUT"
+  local output="$PARSED_OUTPUT"
+  local crf="$PARSED_CRF"
+  local preset="$PARSED_PRESET"
 
   if [[ "$keep_audio" == 1 ]]; then
     audio_args=(-c:a aac -b:a 128k)
