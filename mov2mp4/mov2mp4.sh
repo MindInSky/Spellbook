@@ -15,6 +15,7 @@ Convert MOV to MP4, max 1080p, smaller file size. Audio is stripped by default.
 
 Options:
   -a, --keep-audio  Include audio (re-encoded as AAC 128k)
+  -v, --verbose     Show conversion settings and ffmpeg output
 
 Arguments:
   input.mov   Source video file (required)
@@ -234,10 +235,19 @@ parse_convert_args() {
   PARSED_PRESET="$preset"
 }
 
+file_size_human() {
+  ls -lh "$1" | awk '{print $5}'
+}
+
+print_file_summary() {
+  printf '%s | %s\n' "$1" "$(file_size_human "$1")"
+}
+
 convert_mov() {
   local keep_audio="$1"
-  shift
-  local -a audio_args
+  local verbose="$2"
+  shift 2
+  local -a audio_args ffmpeg_log_args
 
   parse_convert_args "$@"
 
@@ -262,22 +272,30 @@ convert_mov() {
     exit 1
   fi
 
-  echo "Input:  $input"
-  echo "Output: $output"
-  echo "CRF:    $crf"
-  echo "Preset: $preset"
-  echo "Audio:  $([[ "$keep_audio" == 1 ]] && echo "keep (AAC 128k)" || echo "strip")"
-  echo
+  if [[ "$verbose" == 1 ]]; then
+    ffmpeg_log_args=()
+  else
+    ffmpeg_log_args=(-hide_banner -loglevel error -nostats)
+  fi
 
-  ffmpeg -i "$input" \
+  if [[ "$verbose" == 1 ]]; then
+    echo "Input:  $input"
+    echo "Output: $output"
+    echo "CRF:    $crf"
+    echo "Preset: $preset"
+    echo "Audio:  $([[ "$keep_audio" == 1 ]] && echo "keep (AAC 128k)" || echo "strip")"
+    echo
+  fi
+
+  ffmpeg "${ffmpeg_log_args[@]}" -i "$input" \
     -vf "scale=1920:1080:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2" \
     -c:v libx264 -crf "$crf" -preset "$preset" \
     "${audio_args[@]}" -movflags +faststart \
     -y "$output"
 
-  echo
   echo "Done."
-  ls -lh "$input" "$output"
+  print_file_summary "$input"
+  print_file_summary "$output"
 }
 
 case "${1:-}" in
@@ -292,11 +310,16 @@ case "${1:-}" in
     ;;
   *)
     keep_audio=0
+    verbose=0
     positional=()
     while [[ $# -gt 0 ]]; do
       case "$1" in
         -a|--keep-audio)
           keep_audio=1
+          shift
+          ;;
+        -v|--verbose)
+          verbose=1
           shift
           ;;
         *)
@@ -311,6 +334,6 @@ case "${1:-}" in
       exit 1
     fi
 
-    convert_mov "$keep_audio" "${positional[@]}"
+    convert_mov "$keep_audio" "$verbose" "${positional[@]}"
     ;;
 esac

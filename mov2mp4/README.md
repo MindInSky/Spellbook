@@ -58,6 +58,7 @@ If you move this directory, run `uninstall` then `install` from the new location
 | Flag | Description |
 |------|-------------|
 | `-a`, `--keep-audio` | Keep audio (re-encoded as AAC 128k) |
+| `-v`, `--verbose` | Show conversion settings and ffmpeg output (off by default) |
 
 | Argument | Default | Description |
 |----------|---------|-------------|
